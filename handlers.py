@@ -41,6 +41,17 @@ except ValueError:
     driver = None
 
 
+@plugin.on_enabled()
+async def _on_plugin_enabled():
+    logger.info("[group_analysis] 插件已启用，命令与定时任务恢复")
+    start_scheduler()
+
+
+@plugin.on_disabled()
+async def _on_plugin_disabled():
+    logger.info("[group_analysis] 插件已禁用，命令与定时任务停止响应")
+
+
 # ============ 权限 ============
 
 async def _is_admin(bot: Bot, event: MessageEvent) -> bool:
@@ -69,6 +80,8 @@ def _extract_text(message: Message) -> str:
 
 @on_command("群分析", aliases={"group_analysis"}, priority=5, block=True).handle()
 async def handle_group_analysis(matcher: Matcher, event: GroupMessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     group_id = str(event.group_id)
@@ -112,6 +125,8 @@ async def handle_group_analysis(matcher: Matcher, event: GroupMessageEvent, bot:
 
 @on_command("分析设置", aliases={"analysis_settings"}, priority=5, block=True).handle()
 async def handle_analysis_settings(matcher: Matcher, event: GroupMessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     cfg = get_config()
@@ -221,6 +236,8 @@ async def handle_analysis_settings(matcher: Matcher, event: GroupMessageEvent, b
 
 @on_command("设置格式", aliases={"set_format"}, priority=5, block=True).handle()
 async def handle_set_format(matcher: Matcher, event: MessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     text = _extract_text(arg).strip().lower()
@@ -249,6 +266,8 @@ async def handle_set_format(matcher: Matcher, event: MessageEvent, bot: Bot, arg
 
 @on_command("设置模板", aliases={"set_template"}, priority=5, block=True).handle()
 async def handle_set_template(matcher: Matcher, event: MessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     templates = list_available_templates()
@@ -276,6 +295,8 @@ async def handle_set_template(matcher: Matcher, event: MessageEvent, bot: Bot, a
 
 @on_command("查看模板", aliases={"view_templates"}, priority=5, block=True).handle()
 async def handle_view_templates(matcher: Matcher, event: MessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     templates = list_available_templates()
@@ -294,6 +315,8 @@ async def handle_view_templates(matcher: Matcher, event: MessageEvent, bot: Bot,
 
 @on_command("增量状态", aliases={"incremental_status"}, priority=5, block=True).handle()
 async def handle_incremental_status(matcher: Matcher, event: GroupMessageEvent, bot: Bot, arg: Message = CommandArg()):
+    if not plugin.is_enabled:
+        return  # 插件已禁用，不响应任何命令
     if not await _is_admin(bot, event):
         await finish_with(matcher, message="❌ 仅插件管理员或群管理员可使用此命令")
     cfg = get_config()

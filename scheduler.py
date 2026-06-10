@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 from nekro_agent.api.core import logger
 
 from .fetcher import get_group_list
-from .plugin import get_config
+from .plugin import get_config, plugin
 from .service import in_filtered_list, is_group_allowed, perform_auto_analysis_for_group
 from .service import execute_incremental_analysis
 
@@ -138,6 +138,8 @@ async def _scheduler_loop() -> None:
     while True:
         try:
             await asyncio.sleep(20)
+            if not plugin.is_enabled:
+                continue  # 插件被禁用时不执行任何定时/增量任务
             cfg = get_config()
             now = datetime.now()
             hhmm = now.strftime("%H:%M")

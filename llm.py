@@ -56,14 +56,15 @@ async def get_persona_prompt() -> str:
     cfg = get_config()
     if cfg.PERSONA_PROMPT.strip():
         return cfg.PERSONA_PROMPT.strip()
-    if cfg.PERSONA_PRESET_ID:
+    pid = str(cfg.PERSONA_PRESET_ID).strip()
+    if pid.isdigit():
         try:
             from nekro_agent.models.db_preset import DBPreset
 
-            preset = await DBPreset.get_or_none(id=cfg.PERSONA_PRESET_ID)
+            preset = await DBPreset.get_or_none(id=int(pid))
             if preset and preset.content:
                 return str(preset.content)
-            logger.warning(f"[group_analysis] 人设 ID {cfg.PERSONA_PRESET_ID} 不存在或内容为空")
+            logger.warning(f"[group_analysis] 人设 ID {pid} 不存在或内容为空")
         except Exception as e:
             logger.warning(f"[group_analysis] 读取人设失败: {e!r}")
     return ""

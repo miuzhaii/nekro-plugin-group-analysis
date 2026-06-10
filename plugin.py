@@ -303,8 +303,8 @@ class GroupAnalysisConfig(ConfigBase):
         title="启用结构化输出 (response_format)",
         description="向 LLM 传递 json_schema response_format；接口不支持时自动降级重试",
     )
-    PERSONA_PRESET_ID: Optional[int] = Field(
-        default=None,
+    PERSONA_PRESET_ID: str = Field(
+        default="",
         title="分析人格（人设）",
         description="选择一个人设，分析报告将以该人设口吻输出；为空则不使用人设。若下方『自定义分析人格』填写了内容，则优先使用自定义文本",
         json_schema_extra=ExtraField(ref_presets=True, ref_presets_no_default=True).model_dump(),

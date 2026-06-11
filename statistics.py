@@ -198,9 +198,32 @@ def get_hourly_chart_data(hourly_activity: dict) -> List[dict]:
     return chart_data
 
 
+def _build_member_name_map(messages: List[dict]) -> Dict[str, str]:
+    names: Dict[str, str] = {}
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        sender = msg.get("sender") or {}
+        user_id = str(sender.get("user_id") or "").strip()
+        name = str(sender.get("card") or sender.get("nickname") or "").strip()
+        if user_id and name:
+            names[user_id] = name
+    return names
+
+
+def _at_display_name(at_id, member_names: Dict[str, str]) -> str:
+    text = str(at_id or "").strip()
+    if not text:
+        return ""
+    if text.lower() == "all":
+        return "全体成员"
+    return member_names.get(text) or text
+
+
 def build_llm_text_messages(messages: List[dict], bot_self_ids: List[str]) -> List[dict]:
     """提取用于 LLM 分析的文本消息: [{sender, time, content, user_id}]"""
     bot_ids = {str(x).strip() for x in bot_self_ids if str(x).strip()}
+    member_names = _build_member_name_map(messages)
     text_messages = []
     for msg in messages:
         sender = msg.get("sender") or {}
@@ -219,8 +242,9 @@ def build_llm_text_messages(messages: List[dict], bot_self_ids: List[str]) -> Li
                     text_parts.append(t)
             elif seg_type == "at":
                 at_id = data.get("qq") or data.get("id")
-                if at_id:
-                    text_parts.append(f"@{at_id}")
+                at_name = _at_display_name(at_id, member_names)
+                if at_name:
+                    text_parts.append(f"@{at_name}")
             elif seg_type == "reply":
                 rid = data.get("id")
                 if rid:

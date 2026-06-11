@@ -200,12 +200,24 @@ async def _send_group_text(group_id: str, text: str) -> None:
     )
 
 
+def _is_image_send_ack_timeout(exc: Exception) -> bool:
+    text = repr(exc)
+    return "retcode=1200" in text and "invoke timeout" in text
+
+
 async def _send_group_image(group_id: str, image_bytes: bytes) -> None:
     b64 = base64.b64encode(image_bytes).decode()
-    await get_bot().call_api(
-        "send_msg", message_type="group", group_id=int(group_id),
-        message=[{"type": "image", "data": {"file": f"base64://{b64}"}}],
-    )
+    try:
+        await get_bot().call_api(
+            "send_msg", message_type="group", group_id=int(group_id),
+            message=[{"type": "image", "data": {"file": f"base64://{b64}"}}],
+        )
+    except Exception as e:
+        if _is_image_send_ack_timeout(e):
+            logger.warning(f"[group_analysis] 图片发送 ACK 超时，可能已成功送达 group={group_id}: {e!r}")
+            return
+        raise
+
 
 
 async def _upload_group_file(group_id: str, file_path: Path, filename: str) -> bool:

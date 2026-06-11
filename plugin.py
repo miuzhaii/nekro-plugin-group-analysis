@@ -231,7 +231,7 @@ plugin = NekroPlugin(
     name="群聊日常分析",
     module_name="group_analysis",
     description="/群分析 指令：基于群聊记录生成精美的日常分析报告（话题总结、用户称号、群圣经、质量锐评），支持定时与增量分析",
-    version="1.0.2",
+    version="1.0.3",
     author="xiaojiu",
     url="https://github.com/miuzhaii/nekro-plugin-group-analysis",
 )

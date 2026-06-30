@@ -5,9 +5,11 @@ nekro-agent 配置的模型组（OpenAI 兼容接口）。
 """
 
 import asyncio
+import re
 from string import Template
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 from nekro_agent.api.core import config as core_config
 from nekro_agent.api.core import logger
 from openai import AsyncOpenAI
@@ -83,6 +85,79 @@ def resolve_model_group(override_name: str = ""):
     raise RuntimeError(f"模型组 {name} 不存在且无可用主模型组")
 
 
+def _create_http_client(
+    proxy_url: Optional[str],
+    read_timeout: int,
+    write_timeout: int,
+) -> httpx.AsyncClient:
+    """创建插件自己的 HTTP 客户端。
+
+    这个 PR 原本复用了 nekro_agent.services.agent.openai._create_http_client，
+    但该函数属于 nekro-agent 的内部私有实现，不同版本未必存在。
+    如果插件在 import 阶段依赖它，旧版本或部分部署环境会直接 ImportError，
+    导致插件还没运行到 LLM 调用就启动失败。
+
+    因此这里保留 PR 的核心行为：
+    - 使用模型组的 CHAT_PROXY 代理配置；
+    - 沿用插件自己的 LLM_TIMEOUT；
+    - 禁用 OpenAI SDK 内置重试后，让 call_llm 统一处理重试和日志摘要；
+
+    同时把 HTTP client 创建逻辑放在插件内，避免绑定 nekro-agent 的私有 API。
+    后续如果 nekro-agent 暴露稳定的公共 helper，再考虑切回公共接口。
+    """
+    timeout = httpx.Timeout(
+        timeout=None,
+        connect=10.0,
+        read=float(read_timeout),
+        write=float(write_timeout),
+        pool=10.0,
+    )
+    kwargs = {"timeout": timeout}
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    return httpx.AsyncClient(**kwargs)
+
+
+def _html_to_text(text: str) -> str:
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_html_field(pattern: str, text: str) -> str:
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return _html_to_text(match.group(1))
+
+
+def _summarize_llm_error(error: Exception) -> str:
+    """把上游 HTML 错误页压缩成可读摘要，避免污染日志。"""
+    error_type = type(error).__name__
+    status_code = getattr(error, "status_code", None)
+    raw = str(error)
+    lower = raw.lower()
+
+    if "<html" in lower or "<!doctype html" in lower:
+        title = _extract_html_field(r"<title[^>]*>(.*?)</title>", raw)
+        headline = _extract_html_field(r"<h1[^>]*>(.*?)</h1>", raw)
+        subheadline = _extract_html_field(r"<h2[^>]*>(.*?)</h2>", raw)
+        ray_id = _extract_html_field(r"Cloudflare Ray ID:\s*<strong[^>]*>(.*?)</strong>", raw)
+        details = [part for part in (title, headline, subheadline) if part]
+        if "cloudflare" in lower:
+            details.append("上游接口返回 Cloudflare 拦截页，请检查模型组 BASE_URL、代理/IP 白名单或服务商风控")
+        if ray_id:
+            details.append(f"Ray ID: {ray_id}")
+        message = "；".join(details) or "上游接口返回 HTML 错误页"
+    else:
+        message = re.sub(r"\s+", " ", raw).strip()
+
+    if len(message) > 500:
+        message = f"{message[:500]}..."
+    status = f" status={status_code}" if status_code is not None else ""
+    return f"{error_type}{status}: {message}"
+
+
 async def call_llm(
     prompt: str,
     system_prompt: str = "",
@@ -93,47 +168,66 @@ async def call_llm(
     """调用 LLM（带重试与 response_format 自动降级）"""
     cfg = get_config()
     _, mg = resolve_model_group(model_group)
-    client = AsyncOpenAI(api_key=mg.API_KEY, base_url=mg.BASE_URL, timeout=cfg.LLM_TIMEOUT)
+    use_response_format = response_format if cfg.ENABLE_STRUCTURED_OUTPUT else None
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    use_response_format = response_format if cfg.ENABLE_STRUCTURED_OUTPUT else None
     last_err: Optional[Exception] = None
-    for attempt in range(cfg.LLM_RETRIES + 1):
-        try:
-            kwargs = {"model": mg.CHAT_MODEL, "messages": messages}
-            if temperature is not None:
-                kwargs["temperature"] = temperature
-            elif mg.TEMPERATURE is not None:
-                kwargs["temperature"] = mg.TEMPERATURE
-            if use_response_format:
-                kwargs["response_format"] = use_response_format
-            resp = await client.chat.completions.create(**kwargs)
-            text = (resp.choices[0].message.content or "") if resp.choices else ""
-            usage = TokenUsage()
-            if getattr(resp, "usage", None):
-                usage = TokenUsage(
-                    prompt_tokens=getattr(resp.usage, "prompt_tokens", 0) or 0,
-                    completion_tokens=getattr(resp.usage, "completion_tokens", 0) or 0,
-                    total_tokens=getattr(resp.usage, "total_tokens", 0) or 0,
-                )
-            if not text.strip():
-                raise RuntimeError("LLM 返回空内容")
-            return text, usage
-        except Exception as e:  # noqa: PERF203
-            last_err = e
-            err_str = str(e).lower()
-            if use_response_format and ("response_format" in err_str or "400" in err_str or "invalid" in err_str):
-                logger.warning(f"[group_analysis] response_format 疑似不被支持，降级为普通输出重试: {e!r}")
-                use_response_format = None
-                continue
-            if attempt < cfg.LLM_RETRIES:
-                wait = cfg.LLM_BACKOFF * (attempt + 1)
-                logger.warning(f"[group_analysis] LLM 调用失败({attempt + 1})，{wait}s 后重试: {e!r}")
-                await asyncio.sleep(wait)
-    raise RuntimeError(f"LLM 调用失败: {last_err!r}")
+    async with (
+        _create_http_client(
+            proxy_url=(mg.CHAT_PROXY or "").strip() or None,
+            read_timeout=cfg.LLM_TIMEOUT,
+            write_timeout=cfg.LLM_TIMEOUT,
+        ) as http_client,
+        AsyncOpenAI(
+            api_key=mg.API_KEY,
+            base_url=mg.BASE_URL,
+            http_client=http_client,
+            max_retries=0,
+        ) as client,
+    ):
+        for attempt in range(cfg.LLM_RETRIES + 1):
+            try:
+                kwargs = {"model": mg.CHAT_MODEL, "messages": messages}
+                if temperature is not None:
+                    kwargs["temperature"] = temperature
+                elif mg.TEMPERATURE is not None:
+                    kwargs["temperature"] = mg.TEMPERATURE
+                if use_response_format:
+                    kwargs["response_format"] = use_response_format
+                resp = await client.chat.completions.create(**kwargs)
+                text = (resp.choices[0].message.content or "") if resp.choices else ""
+                usage = TokenUsage()
+                if getattr(resp, "usage", None):
+                    usage = TokenUsage(
+                        prompt_tokens=getattr(resp.usage, "prompt_tokens", 0) or 0,
+                        completion_tokens=getattr(resp.usage, "completion_tokens", 0) or 0,
+                        total_tokens=getattr(resp.usage, "total_tokens", 0) or 0,
+                    )
+                if not text.strip():
+                    raise RuntimeError("LLM 返回空内容")
+                return text, usage
+            except Exception as e:  # noqa: PERF203
+                last_err = e
+                err_str = str(e).lower()
+                err_summary = _summarize_llm_error(e)
+                if use_response_format and ("response_format" in err_str or "400" in err_str or "invalid" in err_str):
+                    logger.warning(
+                        f"[group_analysis] response_format 疑似不被支持，降级为普通输出重试: {err_summary}",
+                    )
+                    use_response_format = None
+                    continue
+                if attempt < cfg.LLM_RETRIES:
+                    wait = cfg.LLM_BACKOFF * (attempt + 1)
+                    logger.warning(
+                        f"[group_analysis] LLM 调用失败({attempt + 1})，{wait}s 后重试: {err_summary}",
+                    )
+                    await asyncio.sleep(wait)
+    if last_err is not None:
+        raise RuntimeError(f"LLM 调用失败: {_summarize_llm_error(last_err)}") from last_err
+    raise RuntimeError("LLM 调用失败")
 
 
 # ============ 校验模型 ============

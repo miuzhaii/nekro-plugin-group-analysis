@@ -9,9 +9,9 @@ import re
 from string import Template
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 from nekro_agent.api.core import config as core_config
 from nekro_agent.api.core import logger
-from nekro_agent.services.agent.openai import _create_http_client
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -83,6 +83,39 @@ def resolve_model_group(override_name: str = ""):
         logger.warning(f"[group_analysis] 模型组 {name} 不存在，回退主模型组")
         return core_config.USE_MODEL_GROUP, groups[core_config.USE_MODEL_GROUP]
     raise RuntimeError(f"模型组 {name} 不存在且无可用主模型组")
+
+
+def _create_http_client(
+    proxy_url: Optional[str],
+    read_timeout: int,
+    write_timeout: int,
+) -> httpx.AsyncClient:
+    """创建插件自己的 HTTP 客户端。
+
+    这个 PR 原本复用了 nekro_agent.services.agent.openai._create_http_client，
+    但该函数属于 nekro-agent 的内部私有实现，不同版本未必存在。
+    如果插件在 import 阶段依赖它，旧版本或部分部署环境会直接 ImportError，
+    导致插件还没运行到 LLM 调用就启动失败。
+
+    因此这里保留 PR 的核心行为：
+    - 使用模型组的 CHAT_PROXY 代理配置；
+    - 沿用插件自己的 LLM_TIMEOUT；
+    - 禁用 OpenAI SDK 内置重试后，让 call_llm 统一处理重试和日志摘要；
+
+    同时把 HTTP client 创建逻辑放在插件内，避免绑定 nekro-agent 的私有 API。
+    后续如果 nekro-agent 暴露稳定的公共 helper，再考虑切回公共接口。
+    """
+    timeout = httpx.Timeout(
+        timeout=None,
+        connect=10.0,
+        read=float(read_timeout),
+        write=float(write_timeout),
+        pool=10.0,
+    )
+    kwargs = {"timeout": timeout}
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    return httpx.AsyncClient(**kwargs)
 
 
 def _html_to_text(text: str) -> str:

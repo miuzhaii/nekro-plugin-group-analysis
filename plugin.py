@@ -9,7 +9,9 @@ from typing import List, Literal, Optional
 
 from nekro_agent.api.plugin import ConfigBase, NekroPlugin
 from nekro_agent.core.core_utils import ExtraField
-from pydantic import Field
+from pydantic import Field, model_validator
+
+from .config_utils import clamp_numeric_mapping, runtime_limit
 
 MODEL_GROUP_REF = ExtraField(ref_model_groups=True, model_type="chat").model_dump()
 
@@ -231,14 +233,33 @@ plugin = NekroPlugin(
     name="群聊日常分析",
     module_name="group_analysis",
     description="/群分析 指令：基于群聊记录生成精美的日常分析报告（话题总结、用户称号、群圣经、质量锐评），支持定时与增量分析",
-    version="1.0.3",
+    version="1.0.4",
     author="xiaojiu",
     url="https://github.com/miuzhaii/nekro-plugin-group-analysis",
 )
 
 
+# 配置可存更大值（兼容手改 yaml / 迁移），LLM 与渲染另有硬顶，避免超长出图
+RUNTIME_MAX_TOPICS = 15
+RUNTIME_MAX_USER_TITLES = 20
+RUNTIME_MAX_GOLDEN_QUOTES = 15
+
+
 @plugin.mount_config()
 class GroupAnalysisConfig(ConfigBase):
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp_numeric_fields(cls, data):
+        def _warn(msg: str) -> None:
+            try:
+                from nekro_agent.api.core import logger
+
+                logger.warning(f"[group_analysis] {msg}")
+            except Exception:
+                pass
+
+        return clamp_numeric_mapping(data, cls.model_fields, warn=_warn)
+
     # ---------- 基础 ----------
     GROUP_LIST_MODE: Literal["none", "whitelist", "blacklist"] = Field(
         default="none",
@@ -321,9 +342,27 @@ class GroupAnalysisConfig(ConfigBase):
     USER_TITLE_ENABLED: bool = Field(default=True, title="启用用户称号分析")
     GOLDEN_QUOTE_ENABLED: bool = Field(default=True, title="启用金句(群圣经)分析")
     CHAT_QUALITY_ENABLED: bool = Field(default=True, title="启用聊天质量锐评")
-    MAX_TOPICS: int = Field(default=5, title="最大话题数", ge=1, le=10)
-    MAX_USER_TITLES: int = Field(default=8, title="最大用户称号数", ge=1, le=15)
-    MAX_GOLDEN_QUOTES: int = Field(default=5, title="最大金句数", ge=1, le=10)
+    MAX_TOPICS: int = Field(
+        default=5,
+        title="最大话题数",
+        description="配置上限 50；实际分析/出图硬顶 15，超出部分会被夹紧",
+        ge=1,
+        le=50,
+    )
+    MAX_USER_TITLES: int = Field(
+        default=8,
+        title="最大用户称号数",
+        description="配置上限 80；实际分析/出图硬顶 20，超出部分会被夹紧",
+        ge=1,
+        le=80,
+    )
+    MAX_GOLDEN_QUOTES: int = Field(
+        default=5,
+        title="最大金句数",
+        description="配置上限 50；实际分析/出图硬顶 15，超出部分会被夹紧",
+        ge=1,
+        le=50,
+    )
 
     # ---------- 定时分析 ----------
     AUTO_ANALYSIS_TIMES: List[str] = Field(
@@ -408,10 +447,21 @@ class GroupAnalysisConfig(ConfigBase):
     QUALITY_PROMPT: str = Field(default=DEFAULT_QUALITY_PROMPT, title="质量锐评提示词")
     QUALITY_SUMMARY_PROMPT: str = Field(default=DEFAULT_QUALITY_SUMMARY_PROMPT, title="质量锐评汇总提示词（增量）")
 
+    def effective_max_topics(self, requested: Optional[int] = None) -> int:
+        raw = self.MAX_TOPICS if requested is None else requested
+        return runtime_limit(raw, RUNTIME_MAX_TOPICS)
+
+    def effective_max_user_titles(self, requested: Optional[int] = None) -> int:
+        raw = self.MAX_USER_TITLES if requested is None else requested
+        return runtime_limit(raw, RUNTIME_MAX_USER_TITLES)
+
+    def effective_max_golden_quotes(self, requested: Optional[int] = None) -> int:
+        raw = self.MAX_GOLDEN_QUOTES if requested is None else requested
+        return runtime_limit(raw, RUNTIME_MAX_GOLDEN_QUOTES)
+
 
 def get_config() -> GroupAnalysisConfig:
     return plugin.get_config(GroupAnalysisConfig)
 
 
-config: GroupAnalysisConfig = get_config()
 store = plugin.store

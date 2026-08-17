@@ -100,6 +100,8 @@ docker restart nekro_agent
 - **增量分析**：把群号加入 `INCREMENTAL_GROUP_LIST`，活跃时段内每隔 `INCREMENTAL_INTERVAL_MINUTES` 分钟自动提取一批，报告时间点汇总
 - **分析人格**：`PERSONA_PROMPT` 填入人设后，报告以该人设口吻输出
 - **渲染服务**：`RENDER_ENDPOINT` 指向 browserless/chromium 容器（部署见上方「安装部署」第 1 步），渲染失败自动回退文本报告
+- **话题 / 称号 / 金句上限**：配置允许 `MAX_TOPICS≤50`、`MAX_USER_TITLES≤80`、`MAX_GOLDEN_QUOTES≤50`。手改 yaml 超出范围会被夹紧而**不会导致插件加载失败**。实际分析与出图另有硬顶（话题 15 / 称号 20 / 金句 15），避免超长报告把渲染和发图打爆
+- **当前版本**：`1.0.4`
 
 ## 🔧 与原版的差异
 

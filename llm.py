@@ -399,7 +399,7 @@ async def analyze_topics(
     cfg = get_config()
     if not cfg.TOPIC_ENABLED or not text_messages:
         return [], TokenUsage()
-    max_count = max_topics or cfg.MAX_TOPICS
+    max_count = cfg.effective_max_topics(max_topics)
     prompt = render_prompt(
         cfg.TOPIC_PROMPT, max_topics=max_count, messages_text=_messages_to_text(text_messages),
     )
@@ -494,7 +494,7 @@ async def analyze_user_titles(
         for u in summaries
     )
     prompt = render_prompt(cfg.USER_TITLE_PROMPT, users_text=users_text)
-    max_count = cfg.MAX_USER_TITLES
+    max_count = cfg.effective_max_user_titles()
     try:
         async with _get_semaphore():
             result_text, usage = await call_llm(
@@ -543,7 +543,7 @@ async def analyze_golden_quotes(
     interesting = [m for m in text_messages if 2 <= len(m["content"]) <= 500]
     if not interesting:
         return [], TokenUsage()
-    max_count = max_quotes or cfg.MAX_GOLDEN_QUOTES
+    max_count = cfg.effective_max_golden_quotes(max_quotes)
     prompt = render_prompt(
         cfg.GOLDEN_QUOTE_PROMPT, max_golden_quotes=max_count, messages_text=_messages_to_text(interesting),
     )

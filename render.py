@@ -172,7 +172,7 @@ async def prepare_render_data(analysis_result: dict, nickname_map: Dict[str, str
 
     # 话题
     topics_list = []
-    for i, topic in enumerate(topics[: cfg.MAX_TOPICS], 1):
+    for i, topic in enumerate(topics[: cfg.effective_max_topics()], 1):
         detail_html = await render_mentions(topic.detail, nickname_map)
         topics_list.append(
             {
@@ -186,7 +186,7 @@ async def prepare_render_data(analysis_result: dict, nickname_map: Dict[str, str
 
     # 用户称号
     titles_list = []
-    for t in user_titles[: cfg.MAX_USER_TITLES]:
+    for t in user_titles[: cfg.effective_max_user_titles()]:
         avatar = await get_avatar_data_uri(t.user_id)
         titles_list.append(
             {
@@ -203,7 +203,7 @@ async def prepare_render_data(analysis_result: dict, nickname_map: Dict[str, str
 
     # 金句
     quotes_list = []
-    for q in golden_quotes[: cfg.MAX_GOLDEN_QUOTES]:
+    for q in golden_quotes[: cfg.effective_max_golden_quotes()]:
         avatar = await get_avatar_data_uri(q.user_id) if q.user_id else None
         reason_html = await render_mentions(q.reason, nickname_map)
         quotes_list.append(
@@ -373,19 +373,19 @@ def generate_text_report(analysis_result: dict, nickname_map: Dict[str, str]) ->
 
 💬 热门话题
 """
-    for i, topic in enumerate(topics[: cfg.MAX_TOPICS], 1):
+    for i, topic in enumerate(topics[: cfg.effective_max_topics()], 1):
         contributors_str = "、".join(topic.contributors)
         report += f"{i}. {topic.topic}\n"
         report += f"   参与者: {contributors_str}\n"
         report += f"   {strip_mentions(topic.detail, nickname_map)}\n\n"
 
     report += "🏆 群友称号\n"
-    for title in user_titles[: cfg.MAX_USER_TITLES]:
+    for title in user_titles[: cfg.effective_max_user_titles()]:
         report += f"• {title.name} - {title.title} ({title.mbti})\n"
         report += f"  {strip_mentions(title.reason, nickname_map)}\n\n"
 
     report += "💬 群圣经\n"
-    for i, q in enumerate(stats.golden_quotes[: cfg.MAX_GOLDEN_QUOTES], 1):
+    for i, q in enumerate(stats.golden_quotes[: cfg.effective_max_golden_quotes()], 1):
         report += f'{i}. "{q.content}" —— {q.sender}\n'
         report += f"   {strip_mentions(q.reason, nickname_map)}\n\n"
 
